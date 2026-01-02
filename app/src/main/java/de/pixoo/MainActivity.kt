@@ -1,0 +1,411 @@
+package de.pixoo
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.util.Collections
+import kotlinx.coroutines.delay
+
+
+class MainActivity : ComponentActivity() {
+    private val pixooManager = PixooManager()
+
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+            val granted = permissions.entries.all { it.value }
+            if (granted) {
+                // Permissions granted
+            } else {
+                // Permissions denied
+                throw Exception("Permissions not granted")
+            }
+        }
+
+    private fun checkAndRequestBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val permissions = arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT
+            )
+
+            val missingPermissions = permissions.filter {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }
+
+            if (missingPermissions.isNotEmpty()) {
+                requestPermissionLauncher.launch(missingPermissions.toTypedArray())
+            } else {
+                // Permissions already granted
+            }
+        } else {
+            // Logic for Android 11 and below; ignore
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        checkAndRequestBluetoothPermissions()
+        super.onCreate(savedInstanceState)
+        setContent { MaterialTheme { PixooApp(pixooManager) } }
+    }
+}
+
+
+@Composable
+fun PixooApp(pixooManager: PixooManager) {
+    var currentMode by remember { mutableStateOf("Connection") }
+    var selectedImages by remember { mutableStateOf(listOf<Uri>()) }
+    var currentIndex by remember { mutableIntStateOf(0) }
+    var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    fun showPreview(bitmap: Bitmap) {
+        scope.launch {
+            previewBitmap = bitmap
+            delay(2000) // Wait for 2 seconds
+            // Only clear if the current preview is still the one we set (handling rapid clicks)
+            if (previewBitmap == bitmap) {
+                previewBitmap = null
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (currentMode) {
+            "Connection" -> ConnectionScreen(pixooManager) { currentMode = "ImageSettings" }
+
+            "ImageSettings" -> ImageSettingsScreen(
+                imageList = selectedImages,
+                onAdd = { uri -> selectedImages = selectedImages + uri },
+                onRemove = { index ->
+                    val mutableList = selectedImages.toMutableList()
+                    mutableList.removeAt(index)
+                    selectedImages = mutableList
+                },
+                onReorder = { selectedImages = it },
+                onPlay = {
+                    currentMode = "PlayMode"
+                    scope.launch(Dispatchers.IO) {
+                        val loadedBitmap = if (selectedImages.isNotEmpty()) {
+                            loadBitmapFromUri(context, selectedImages[currentIndex])
+                        } else null
+
+                        currentBitmap = loadedBitmap
+
+                        if (loadedBitmap != null) {
+                            Log.d("PixooApp", "Sending loaded bitmap to device")
+                            pixooManager.sendImage(loadedBitmap)
+                        }
+                    }
+                },
+                onOpenSettings = { currentMode = "Connection" },
+
+                fillRed = {
+                    scope.launch(Dispatchers.IO) {
+                        val bmp = pixooManager.fillRed()
+                        showPreview(bmp)
+                    }
+                },
+                fillBlue = {
+                    scope.launch(Dispatchers.IO) {
+                        val bmp = pixooManager.fillBlue()
+                        showPreview(bmp)
+                    }
+                },
+                drawGradient = {
+                    scope.launch(Dispatchers.IO) {
+                        val bmp = pixooManager.drawGradient()
+                        showPreview(bmp)
+                    }
+                },
+                drawSquares = {
+                    scope.launch(Dispatchers.IO) {
+                        val bmp = pixooManager.drawSquares()
+                        showPreview(bmp)
+                    }
+                },
+                pixelTest = {
+                    scope.launch(Dispatchers.IO) {
+                        val bmp = pixooManager.pixelTest()
+                        showPreview(bmp)
+                    }
+                },
+                pixelTest2 = {
+                    scope.launch(Dispatchers.IO) {
+                        val bmp = pixooManager.pixelTest2()
+                        showPreview(bmp)
+                    }
+                }
+            )
+
+            "PlayMode" -> PlayModeScreen(
+                bitmap = currentBitmap,
+                onNext = {
+                    if (selectedImages.isNotEmpty()) {
+                        currentIndex = (currentIndex + 1) % selectedImages.size
+                        scope.launch(Dispatchers.IO) {
+                            val nextBitmap = loadBitmapFromUri(context, selectedImages[currentIndex])
+                            currentBitmap = nextBitmap
+                            if (nextBitmap != null) {
+                                Log.d("PixooApp", "Sending loaded bitmap to device")
+                                pixooManager.sendImage(nextBitmap)
+                            }
+                        }
+                    } else {
+                        Log.e("PixooApp", "No images to display")
+                    }
+                },
+                onStop = { currentMode = "ImageSettings" }
+            )
+        }
+
+        if (previewBitmap != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Preview",
+                        color = androidx.compose.ui.graphics.Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    Image(
+                        bitmap = previewBitmap!!.asImageBitmap(),
+                        contentDescription = "Pattern Preview",
+                        modifier = Modifier
+                            .size(200.dp) // Large enough to see clearly
+                            .background(androidx.compose.ui.graphics.Color.Black),
+                        contentScale = ContentScale.Fit // Ensure pixel art isn't blurry/cropped weirdly
+                    )
+                }
+            }
+        }
+    }
+}
+
+@SuppressLint("MissingPermission")
+@Composable
+fun ConnectionScreen(pixooManager: PixooManager, onConnected: () -> Unit) {
+    val adapter = BluetoothAdapter.getDefaultAdapter()
+    val devices = adapter?.bondedDevices?.toList() ?: emptyList()
+
+    Column(Modifier
+        .fillMaxSize()
+        .padding(16.dp)) {
+        Text("1. Connection Settings", style = MaterialTheme.typography.headlineSmall)
+        LazyColumn {
+            items(devices) { device: BluetoothDevice ->
+                Button(onClick = {
+                    Thread { if (pixooManager.connect(device)) onConnected() }.start()
+                }, Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp)) {
+                    Text(device.name ?: device.address)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ImageSettingsScreen(
+    imageList: List<Uri>,
+    onAdd: (Uri) -> Unit,
+    onRemove: (Int) -> Unit,
+    onReorder: (List<Uri>) -> Unit,
+    onPlay: () -> Unit,
+    onOpenSettings: () -> Unit,
+    fillRed: () -> Unit,
+    fillBlue: () -> Unit,
+    drawGradient: () -> Unit,
+    drawSquares: () -> Unit,
+    pixelTest: () -> Unit,
+    pixelTest2: () -> Unit
+) {
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            onAdd(uri)
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
+            Button(onClick = onPlay) { Text("Play Mode") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Button(onClick = fillRed) { Text("Fill red") }
+            Button(onClick = fillBlue) { Text("Fill blue") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Button(onClick = pixelTest) { Text("Pixel test") }
+            Button(onClick = pixelTest2) { Text("Pixel test 2") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Button(onClick = drawSquares) { Text("Draw squares") }
+            Button(onClick = drawGradient) { Text("Draw gradient") }
+        }
+        Button(onClick = { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+            Text("Add Image")
+        }
+
+        LazyColumn {
+            itemsIndexed(imageList) { index, uri ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = "Image $index",
+                        modifier = Modifier
+                            .size(64.dp)
+                            .padding(end = 8.dp)
+                            .weight(1f, fill = false),
+                        contentScale = ContentScale.Crop
+                    )
+                    IconButton(onClick = { onReorder(swap(imageList, index, index - 1)) }) {
+                        Icon(Icons.Filled.ArrowUpward, "Move Up")
+                    }
+                    IconButton(onClick = { onReorder(swap(imageList, index, index + 1)) }) {
+                        Icon(Icons.Filled.ArrowDownward, "Move Down")
+                    }
+                    IconButton(onClick = { onRemove(index) }) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = "Delete Image",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PlayModeScreen(bitmap: Bitmap?, onNext: () -> Unit, onStop: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Play Mode Active", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(24.dp))
+
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Scaled Image",
+                // Show it bigger than 32x32 for visibility
+                modifier = Modifier.size(128.dp),
+                contentScale = ContentScale.Fit
+            )
+        } else {
+            Text("No image loaded yet.")
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Button(onClick = onNext) { Text("Next Image") }
+        Button(onClick = onStop) { Text("Stop & Return") }
+    }
+}
+
+fun swap(list: List<Uri>, from: Int, to: Int): List<Uri> {
+    if (to !in list.indices) return list
+    val mutable = list.toMutableList()
+    Collections.swap(mutable, from, to)
+    return mutable
+}
+
+suspend fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
+    try {
+        val request = ImageRequest.Builder(context)
+            .data(uri)
+            .size(32, 32)
+            .allowHardware(false)
+            // Force a standard config here too
+            .bitmapConfig(Bitmap.Config.ARGB_8888)
+            .build()
+        val result = context.imageLoader.execute(request)
+        if (result is SuccessResult) {
+            return (result.drawable as? BitmapDrawable)?.bitmap
+        }
+    } catch (e: Exception) {
+        Log.e("PixooSender", "Load failed: ${e.message}")
+    }
+    return null
+}
