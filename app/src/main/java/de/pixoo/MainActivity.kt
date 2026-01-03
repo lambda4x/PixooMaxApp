@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -135,6 +136,8 @@ fun PixooApp(pixooManager: PixooManager) {
                 onReorder = { selectedImages = it },
                 onPlay = {
                     currentMode = "PlayMode"
+                    fightRound = 1
+                    currentIndex = 0
                     scope.launch(Dispatchers.IO) {
                         val loadedBitmap = if (selectedImages.isNotEmpty()) {
                             loadBitmapFromUri(
@@ -142,9 +145,6 @@ fun PixooApp(pixooManager: PixooManager) {
                                 selectedImages[currentIndex % selectedImages.size]
                             )
                         } else null
-
-                        fightRound = 1
-                        currentIndex = 0
                         currentBitmap = loadedBitmap
 
                         if (loadedBitmap != null) {
@@ -158,10 +158,17 @@ fun PixooApp(pixooManager: PixooManager) {
 
             "PlayMode" -> PlayModeScreen(
                 bitmap = currentBitmap,
+                currentRound = fightRound,
+                onRoundChange = { newRound ->
+                    fightRound = newRound
+                    pixooManager.sendImage(currentBitmap, fightRound)
+                },
                 onNext = {
                     if (selectedImages.isNotEmpty()) {
                         currentIndex = currentIndex + 1
-                        fightRound = (currentIndex / selectedImages.size) + 1
+                        if (currentIndex % selectedImages.size == 0) {
+                            fightRound++
+                        }
                         scope.launch(Dispatchers.IO) {
                             val nextBitmap =
                                 loadBitmapFromUri(
@@ -279,13 +286,41 @@ fun ImageSettingsScreen(
 }
 
 @Composable
-fun PlayModeScreen(bitmap: Bitmap?, onNext: () -> Unit, onStop: () -> Unit) {
+fun PlayModeScreen(
+    bitmap: Bitmap?,
+    currentRound: Int,
+    onRoundChange: (Int) -> Unit,
+    onNext: () -> Unit,
+    onStop: () -> Unit
+) {
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("Play Mode Active", style = MaterialTheme.typography.headlineMedium)
+        Spacer(Modifier.height(24.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            IconButton(onClick = { if (currentRound > 1) onRoundChange(currentRound - 1) }) {
+                Icon(Icons.Filled.ArrowDownward, "Decrease Round")
+            }
+
+            Text(
+                text = "Round: $currentRound",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
+            IconButton(onClick = {
+                onRoundChange(currentRound + 1)
+            }) {
+                Icon(Icons.Filled.ArrowUpward, "Increase Round")
+            }
+        }
         Spacer(Modifier.height(24.dp))
 
         if (bitmap != null) {
@@ -301,7 +336,18 @@ fun PlayModeScreen(bitmap: Bitmap?, onNext: () -> Unit, onStop: () -> Unit) {
         }
 
         Spacer(Modifier.height(24.dp))
-        Button(onClick = onNext) { Text("Next Image") }
+        Button(
+            onClick = onNext,
+            modifier = Modifier
+                .width(200.dp)
+                .height(60.dp)
+        ) {
+            Text(
+                "Next Image",
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
+        Spacer(Modifier.height(24.dp))
         Button(onClick = onStop) { Text("Stop & Return") }
     }
 }
@@ -319,7 +365,6 @@ suspend fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
             .data(uri)
             .size(32, 32)
             .allowHardware(false)
-            // Force a standard config here too
             .bitmapConfig(Bitmap.Config.ARGB_8888)
             .build()
         val result = context.imageLoader.execute(request)

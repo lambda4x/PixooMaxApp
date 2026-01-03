@@ -73,17 +73,17 @@ class PixooManager {
         inputStream = null
     }
 
-    fun sendImage(bitmap: Bitmap, overlayNumber: Int) {
+    fun sendImage(bitmap: Bitmap?, overlayNumber: Int) {
         if (outputStream == null) return
+        if (bitmap == null) return
 
         // Based on https://github.com/HoroTW/pixoo-awesome/blob/main/modules/pixoo_client.py
         val rawBitmap = Bitmap.createScaledBitmap(bitmap, WIDTH, HEIGHT, false)
             .copy(Bitmap.Config.ARGB_8888, false)
         val bitmapWithText = drawNumberOnBitmap(rawBitmap, overlayNumber, Color.BLACK)
-        val quantizedBitamp = quantizeBitmap(bitmapWithText)
 
         var colors = mutableListOf<Int>()
-        val pixels = getColorPaletteAndColorReferencedImage(colors, quantizedBitamp)
+        val pixels = getColorPaletteAndColorReferencedImage(colors, bitmapWithText)
         val colorCount = colors.size
 
         val header = ByteArray(12)
@@ -159,20 +159,17 @@ class PixooManager {
         val width = bitmap.width
         val height = bitmap.height
 
-        val paletteIndexMap = mutableMapOf<Int, Int>()
-        val screen = IntArray(width * height)
+        var paletteIndexMap = mutableMapOf<Int, Int>()
+        var screen = IntArray(width * height)
 
-        // Build Palette and Screen Index Map
-        var screenIdx = 0
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                val rgb = bitmap.getPixel(x, y) and 0x00FFFFFF
-                val index = paletteIndexMap.getOrPut(rgb) {
-                    palette.add(rgb)
-                    palette.size - 1
-                }
-                screen[screenIdx++] = index
-            }
+        buildPaletteAndPaletteIndexMap(palette, paletteIndexMap, bitmap, screen)
+
+        if (palette.size > 256) {
+            // Need to quantize colors
+            val quantizedBitamp = quantizeBitmap(bitmap)
+            screen = IntArray(width * height)
+            paletteIndexMap = mutableMapOf<Int, Int>()
+            buildPaletteAndPaletteIndexMap(palette, paletteIndexMap, quantizedBitamp, screen)
         }
 
         val bitLength = max(1, ceil(log2(palette.size.toDouble())).toInt())
@@ -214,6 +211,27 @@ class PixooManager {
         // Structure: [Palette Bytes] + [Screen Bytes]
         System.arraycopy(screenBuffer, 0, result, paletteBytes, screenBuffer.size)
         return result
+    }
+
+    fun buildPaletteAndPaletteIndexMap(
+        palette: MutableList<Int>,
+        paletteIndexMap: MutableMap<Int, Int>,
+        bitmap: Bitmap,
+        screen: IntArray
+    ) {
+        var screenIdx = 0
+        val width = bitmap.width
+        val height = bitmap.height
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val rgb = bitmap.getPixel(x, y) and 0x00FFFFFF
+                val index = paletteIndexMap.getOrPut(rgb) {
+                    palette.add(rgb)
+                    palette.size - 1
+                }
+                screen[screenIdx++] = index
+            }
+        }
     }
 
 
