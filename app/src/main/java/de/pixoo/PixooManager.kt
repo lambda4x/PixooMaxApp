@@ -98,7 +98,6 @@ class PixooManager {
         System.arraycopy(header, 0, fullPayload, 0, header.size)
         System.arraycopy(pixels, 0, fullPayload, header.size, pixels.size)
 
-        Log.d(TAG, "Sending Image Packet (${fullPayload.size} bytes)...")
         sendPacket(0x44.toByte(), fullPayload)
     }
 
@@ -118,13 +117,16 @@ class PixooManager {
                 pixels[index++] = pixel.blue.toByte()  // B
             }
         }
-        printByteArrayHex(pixels, WIDTH*3)
         return pixels
     }
 
-    fun printByteArrayHex(bytes: ByteArray, bytesPerLine: Int = 32) {
+    fun printByteArrayHex(bytes: ByteArray, endAfterbytes: Int = 0, bytesPerLine: Int = 32) {
         val sb = StringBuilder()
         for (i in bytes.indices) {
+            if (endAfterbytes > 0 && i > endAfterbytes) {
+                sb.append("...")
+                break
+            }
             sb.append(String.format("%02X ", bytes[i]))
             if ((i + 1) % bytesPerLine == 0 && i != bytes.size - 1) {
                 sb.append("\n")
@@ -216,7 +218,9 @@ class PixooManager {
         outStream.write(0x02)
 
         val bytes = outStream.toByteArray()
-        printByteArrayHex(bytes)
+
+        Log.d(TAG, "Sending Package (${bytes.size} bytes)...")
+        printByteArrayHex(bytes, 20)
 
         return bytes
     }

@@ -75,8 +75,8 @@ the packages are constructed as follows:
 | 0x00  | 1         | Padding                                                                                                                                       | Yes        |
 | 0x00  | 1         | Padding                                                                                                                                       | Yes        |
 | 0x00  | 1         | Padding                                                                                                                                       | Yes        |
-|       | `32*32*3` | Actual image data encoded as RGB888, i.e. 3 bytes per pixel (RGB) read row wise from left to right, top to bottom                                                                               | Yes        |
-|       | 2         | Checksum, Little Endian, as the sum of the (unescaped) length, (unescaped) command, and (unescaped) image data (including the 11 byte prefix)                                                                                                   | Yes        |
+|       | `32*32*3` | Actual image data encoded as RGB888, i.e. 3 bytes per pixel (RGB) read row wise from left to right, top to bottom                             | Yes        |
+|       | 2         | Checksum, Little Endian, as the sum of the (unescaped) length, (unescaped) command, and (unescaped) image data (including the 11 byte prefix) | Yes        |
 | 0x02  | 1         | Package end flag                                                                                                                              | No         |
 
 `*` Any byte value of `0x01, 0x02, 0x03` is escaped by adding
