@@ -6,8 +6,6 @@ import android.bluetooth.BluetoothSocket
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -293,105 +291,4 @@ class PixooManager {
 
         return bytes
     }
-
-// -------------------------------------------
-// Helper functions to create test patterns
-// -------------------------------------------
-
-    suspend fun drawGradient(): Bitmap = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Filling Screen with red-green Gradient (Corrected Palette Mode)...")
-        val bitmap = createRedGreenGradient(WIDTH, HEIGHT)
-        sendImage(bitmap)
-        return@withContext bitmap
-    }
-
-    suspend fun drawSquares(): Bitmap = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Filling screen with 16 blue and white squares (Corrected Palette Mode)...")
-        val bitmap = generate16QuadrantImage(WIDTH, HEIGHT)
-        sendImage(bitmap)
-        return@withContext bitmap
-    }
-
-    suspend fun fillRed(): Bitmap = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Filling Screen RED")
-        val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
-        for (y in 0 until WIDTH) {
-            for (x in 0 until HEIGHT) {
-                bitmap.setPixel(x, y, Color.RED)
-            }
-        }
-        sendImage(bitmap)
-        return@withContext bitmap
-    }
-
-    suspend fun fillBlue(): Bitmap = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Filling Screen BLUE")
-        val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
-        for (y in 0 until WIDTH) {
-            for (x in 0 until HEIGHT) {
-                bitmap.setPixel(x, y, Color.BLUE)
-            }
-        }
-        sendImage(bitmap)
-        return@withContext bitmap
-    }
-
-    suspend fun pixelTest(): Bitmap = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Filling Screen RED with 1 GREEN pixel (1st pixel)")
-        val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
-        for (y in 0 until WIDTH) {
-            for (x in 0 until HEIGHT) {
-                bitmap.setPixel(x, y, Color.RED)
-            }
-        }
-        bitmap.setPixel(0, 0, Color.GREEN)
-        sendImage(bitmap)
-        return@withContext bitmap
-    }
-
-    suspend fun pixelTest2(): Bitmap = withContext(Dispatchers.IO) {
-        Log.d(TAG, "Filling Screen RED with 1 GREEN pixel (2nd pixel)")
-        val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
-        for (y in 0 until WIDTH) {
-            for (x in 0 until HEIGHT) {
-                bitmap.setPixel(x, y, Color.RED)
-            }
-        }
-        bitmap.setPixel(1, 0, Color.GREEN)
-        sendImage(bitmap)
-        return@withContext bitmap
-    }
-}
-
-private fun generate16QuadrantImage(width: Int, height: Int): Bitmap {
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val squareSize = width / 4
-
-    for (y in 0 until width) {
-        for (x in 0 until height) {
-            val col = x / squareSize
-            val row = y / squareSize
-
-            // Checkerboard logic:
-            // If (col + row) is even -> Blue
-            // If (col + row) is odd  -> White
-            val isBlue = (col + row) % 2 == 0
-
-            val color = if (isBlue) Color.BLUE else Color.WHITE
-            bitmap.setPixel(x, y, color)
-        }
-    }
-    return bitmap
-}
-
-
-private fun createRedGreenGradient(width: Int, height: Int): Bitmap {
-    val loadedBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    for (y in 0 until width) {
-        for (x in 0 until height) {
-            // Create a Green/Red gradient
-            loadedBitmap.setPixel(x, y, Color.rgb(x * 8, y * 8, 0))
-        }
-    }
-    return loadedBitmap
 }

@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -52,7 +51,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -63,9 +61,9 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Collections
-import kotlinx.coroutines.delay
 
 
 class MainActivity : ComponentActivity() {
@@ -162,43 +160,6 @@ fun PixooApp(pixooManager: PixooManager) {
                     }
                 },
                 onOpenSettings = { currentMode = "Connection" },
-
-                fillRed = {
-                    scope.launch(Dispatchers.IO) {
-                        val bmp = pixooManager.fillRed()
-                        showPreview(bmp)
-                    }
-                },
-                fillBlue = {
-                    scope.launch(Dispatchers.IO) {
-                        val bmp = pixooManager.fillBlue()
-                        showPreview(bmp)
-                    }
-                },
-                drawGradient = {
-                    scope.launch(Dispatchers.IO) {
-                        val bmp = pixooManager.drawGradient()
-                        showPreview(bmp)
-                    }
-                },
-                drawSquares = {
-                    scope.launch(Dispatchers.IO) {
-                        val bmp = pixooManager.drawSquares()
-                        showPreview(bmp)
-                    }
-                },
-                pixelTest = {
-                    scope.launch(Dispatchers.IO) {
-                        val bmp = pixooManager.pixelTest()
-                        showPreview(bmp)
-                    }
-                },
-                pixelTest2 = {
-                    scope.launch(Dispatchers.IO) {
-                        val bmp = pixooManager.pixelTest2()
-                        showPreview(bmp)
-                    }
-                }
             )
 
             "PlayMode" -> PlayModeScreen(
@@ -207,7 +168,8 @@ fun PixooApp(pixooManager: PixooManager) {
                     if (selectedImages.isNotEmpty()) {
                         currentIndex = (currentIndex + 1) % selectedImages.size
                         scope.launch(Dispatchers.IO) {
-                            val nextBitmap = loadBitmapFromUri(context, selectedImages[currentIndex])
+                            val nextBitmap =
+                                loadBitmapFromUri(context, selectedImages[currentIndex])
                             currentBitmap = nextBitmap
                             if (nextBitmap != null) {
                                 Log.d("PixooApp", "Sending loaded bitmap to device")
@@ -256,17 +218,21 @@ fun ConnectionScreen(pixooManager: PixooManager, onConnected: () -> Unit) {
     val adapter = BluetoothAdapter.getDefaultAdapter()
     val devices = adapter?.bondedDevices?.toList() ?: emptyList()
 
-    Column(Modifier
-        .fillMaxSize()
-        .padding(16.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
         Text("1. Connection Settings", style = MaterialTheme.typography.headlineSmall)
         LazyColumn {
             items(devices) { device: BluetoothDevice ->
-                Button(onClick = {
-                    Thread { if (pixooManager.connect(device)) onConnected() }.start()
-                }, Modifier
-                    .fillMaxWidth()
-                    .padding(4.dp)) {
+                Button(
+                    onClick = {
+                        Thread { if (pixooManager.connect(device)) onConnected() }.start()
+                    }, Modifier
+                        .fillMaxWidth()
+                        .padding(4.dp)
+                ) {
                     Text(device.name ?: device.address)
                 }
             }
@@ -281,19 +247,14 @@ fun ImageSettingsScreen(
     onRemove: (Int) -> Unit,
     onReorder: (List<Uri>) -> Unit,
     onPlay: () -> Unit,
-    onOpenSettings: () -> Unit,
-    fillRed: () -> Unit,
-    fillBlue: () -> Unit,
-    drawGradient: () -> Unit,
-    drawSquares: () -> Unit,
-    pixelTest: () -> Unit,
-    pixelTest2: () -> Unit
+    onOpenSettings: () -> Unit
 ) {
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) {
-            onAdd(uri)
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) {
+                onAdd(uri)
+            }
         }
-    }
 
     Column(
         Modifier
@@ -303,18 +264,6 @@ fun ImageSettingsScreen(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
             Button(onClick = onPlay) { Text("Play Mode") }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Button(onClick = fillRed) { Text("Fill red") }
-            Button(onClick = fillBlue) { Text("Fill blue") }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Button(onClick = pixelTest) { Text("Pixel test") }
-            Button(onClick = pixelTest2) { Text("Pixel test 2") }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Button(onClick = drawSquares) { Text("Draw squares") }
-            Button(onClick = drawGradient) { Text("Draw gradient") }
         }
         Button(onClick = { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
             Text("Add Image")
