@@ -214,7 +214,11 @@ class PixooManager {
 
         // Signal end of package
         outStream.write(0x02)
-        return outStream.toByteArray()
+
+        val bytes = outStream.toByteArray()
+        printByteArrayHex(bytes)
+
+        return bytes
     }
 
     // -------------------------------------------
