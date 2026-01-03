@@ -8,12 +8,12 @@ in Kotlin.
 
 The app lets a user select several images from their phone, order them,
 and send them to the Pixoo Max display. The next image in the sequence is only
-shown when a "Next" button is clicked on the app.
+shown when a "Next" button is clicked on the app. Additionally, the number of times
+the images have started from the beginning is shown in the top left corner, starting with 1.
 
-This behavior differs from the
-official Divoom app for the Pixoo Max in that the official app only
-lets the user configure the time for which an image is shown. After that,
-the app automatically sends the next image in the sequence.
+I developed this specifically to show whose turn it is in a fight in a pen and paper
+role playing game, e.g. DnD. The number in the top left corner then denotes the
+fighting round.
 
 ## Why another Pixoo Max repository
 
@@ -25,6 +25,7 @@ Therefore, I had to write my own.
 
 To use the app, ensure that these prerequisites are met:
 
+- Android 13+
 - Pixoo Max Display is turned on
 - Mobile phone has bluetooth enabled
 - Pixoo max display and mobile phone are paired via bluetooth

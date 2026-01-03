@@ -73,13 +73,14 @@ class PixooManager {
         inputStream = null
     }
 
-    fun sendImage(bitmap: Bitmap) {
+    fun sendImage(bitmap: Bitmap, overlayNumber: Int) {
         if (outputStream == null) return
 
         // Based on https://github.com/HoroTW/pixoo-awesome/blob/main/modules/pixoo_client.py
         val rawBitmap = Bitmap.createScaledBitmap(bitmap, WIDTH, HEIGHT, false)
             .copy(Bitmap.Config.ARGB_8888, false)
-        val quantizedBitamp = quantizeBitmap(rawBitmap)
+        val bitmapWithText = drawNumberOnBitmap(rawBitmap, overlayNumber, Color.BLACK)
+        val quantizedBitamp = quantizeBitmap(bitmapWithText)
 
         var colors = mutableListOf<Int>()
         val pixels = getColorPaletteAndColorReferencedImage(colors, quantizedBitamp)
@@ -105,6 +106,29 @@ class PixooManager {
         System.arraycopy(pixels, 0, fullPayload, header.size, pixels.size)
 
         sendPacket(0x44.toByte(), fullPayload)
+    }
+
+    fun drawNumberOnBitmap(
+        bitmap: Bitmap,
+        value: Int,
+        color: Int = Color.BLACK,
+        textSize: Float = 7f
+    ): Bitmap {
+        val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = android.graphics.Canvas(mutableBitmap)
+
+        val paint = android.graphics.Paint().apply {
+            this.color = color
+            this.textSize = textSize
+            this.isAntiAlias = false
+            this.textAlign = android.graphics.Paint.Align.LEFT
+            this.typeface = android.graphics.Typeface.MONOSPACE
+        }
+
+        // Draw in top-left corner, offset by (1, text height)
+        canvas.drawText(value.toString(), 1f, textSize, paint)
+
+        return mutableBitmap
     }
 
     fun quantizeBitmap(bitmap: Bitmap): Bitmap {

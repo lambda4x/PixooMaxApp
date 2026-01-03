@@ -18,7 +18,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,7 +60,6 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Collections
 
@@ -114,22 +112,11 @@ fun PixooApp(pixooManager: PixooManager) {
     var currentMode by remember { mutableStateOf("Connection") }
     var selectedImages by remember { mutableStateOf(listOf<Uri>()) }
     var currentIndex by remember { mutableIntStateOf(0) }
+    var fightRound by remember { mutableIntStateOf(1) }
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var previewBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    fun showPreview(bitmap: Bitmap) {
-        scope.launch {
-            previewBitmap = bitmap
-            delay(2000) // Wait for 2 seconds
-            // Only clear if the current preview is still the one we set (handling rapid clicks)
-            if (previewBitmap == bitmap) {
-                previewBitmap = null
-            }
-        }
-    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentMode) {
@@ -137,7 +124,9 @@ fun PixooApp(pixooManager: PixooManager) {
 
             "ImageSettings" -> ImageSettingsScreen(
                 imageList = selectedImages,
-                onAdd = { uri -> selectedImages = selectedImages + uri },
+                onAdd = { uri ->
+                    selectedImages = selectedImages + uri
+                },
                 onRemove = { index ->
                     val mutableList = selectedImages.toMutableList()
                     mutableList.removeAt(index)
@@ -148,14 +137,19 @@ fun PixooApp(pixooManager: PixooManager) {
                     currentMode = "PlayMode"
                     scope.launch(Dispatchers.IO) {
                         val loadedBitmap = if (selectedImages.isNotEmpty()) {
-                            loadBitmapFromUri(context, selectedImages[currentIndex])
+                            loadBitmapFromUri(
+                                context,
+                                selectedImages[currentIndex % selectedImages.size]
+                            )
                         } else null
 
+                        fightRound = 1
+                        currentIndex = 0
                         currentBitmap = loadedBitmap
 
                         if (loadedBitmap != null) {
                             Log.d("PixooApp", "Sending loaded bitmap to device")
-                            pixooManager.sendImage(loadedBitmap)
+                            pixooManager.sendImage(loadedBitmap, 1)
                         }
                     }
                 },
@@ -166,14 +160,18 @@ fun PixooApp(pixooManager: PixooManager) {
                 bitmap = currentBitmap,
                 onNext = {
                     if (selectedImages.isNotEmpty()) {
-                        currentIndex = (currentIndex + 1) % selectedImages.size
+                        currentIndex = currentIndex + 1
+                        fightRound = (currentIndex / selectedImages.size) + 1
                         scope.launch(Dispatchers.IO) {
                             val nextBitmap =
-                                loadBitmapFromUri(context, selectedImages[currentIndex])
+                                loadBitmapFromUri(
+                                    context,
+                                    selectedImages[currentIndex % selectedImages.size]
+                                )
                             currentBitmap = nextBitmap
                             if (nextBitmap != null) {
                                 Log.d("PixooApp", "Sending loaded bitmap to device")
-                                pixooManager.sendImage(nextBitmap)
+                                pixooManager.sendImage(nextBitmap, fightRound)
                             }
                         }
                     } else {
@@ -184,31 +182,6 @@ fun PixooApp(pixooManager: PixooManager) {
             )
         }
 
-        if (previewBitmap != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Preview",
-                        color = androidx.compose.ui.graphics.Color.White,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-                    Image(
-                        bitmap = previewBitmap!!.asImageBitmap(),
-                        contentDescription = "Pattern Preview",
-                        modifier = Modifier
-                            .size(200.dp) // Large enough to see clearly
-                            .background(androidx.compose.ui.graphics.Color.Black),
-                        contentScale = ContentScale.Fit // Ensure pixel art isn't blurry/cropped weirdly
-                    )
-                }
-            }
-        }
     }
 }
 
