@@ -2,6 +2,7 @@ package de.pixoo
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Context
@@ -42,7 +43,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,11 +54,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import coil.compose.AsyncImage
 import coil.imageLoader
 import coil.request.ImageRequest
@@ -63,7 +70,6 @@ import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Collections
-
 
 class MainActivity : ComponentActivity() {
     private val pixooManager = PixooManager()
@@ -103,7 +109,27 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         checkAndRequestBluetoothPermissions()
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { PixooApp(pixooManager) } }
+
+        val myColors = lightColorScheme(
+            primary = Color.LightGray,
+            onPrimary = Color.White,
+            secondary = Color.DarkGray
+        )
+
+        setContent {
+            MaterialTheme(colorScheme = myColors) {
+                val view = LocalView.current
+                if (!view.isInEditMode) {
+                    SideEffect {
+                        val window = (view.context as Activity).window
+                        window.statusBarColor = myColors.primary.toArgb()
+                        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars =
+                            true
+                    }
+                }
+                PixooApp(pixooManager)
+            }
+        }
     }
 }
 
