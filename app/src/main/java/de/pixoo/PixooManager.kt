@@ -6,16 +6,15 @@ import android.bluetooth.BluetoothSocket
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
-import androidx.core.graphics.blue
-import androidx.core.graphics.get
-import androidx.core.graphics.green
-import androidx.core.graphics.red
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import kotlin.math.ceil
+import kotlin.math.log2
+import kotlin.math.max
 
 class PixooManager {
     private var socket: BluetoothSocket? = null
@@ -67,7 +66,10 @@ class PixooManager {
     }
 
     private fun close() {
-        try { socket?.close() } catch (e: Exception) {}
+        try {
+            socket?.close()
+        } catch (e: Exception) {
+        }
         socket = null
         outputStream = null
         inputStream = null
@@ -76,23 +78,29 @@ class PixooManager {
     fun sendImage(bitmap: Bitmap) {
         if (outputStream == null) return
 
-        val standardBitmap = Bitmap.createScaledBitmap(bitmap, WIDTH, HEIGHT, true)
+        // Based on https://github.com/HoroTW/pixoo-awesome/blob/main/modules/pixoo_client.py
+        val rawBitmap = Bitmap.createScaledBitmap(bitmap, WIDTH, HEIGHT, false)
             .copy(Bitmap.Config.ARGB_8888, false)
-        val pixels = getPixelsFromBitmap(WIDTH, HEIGHT, standardBitmap)
+        val quantizedBitamp = quantizeBitmap(rawBitmap)
 
-        val header = ByteArray(11)
+        var colors = mutableListOf<Int>()
+        val pixels = getColorPaletteAndColorReferencedImage(colors, quantizedBitamp)
+        val colorCount = colors.size
+
+        val header = ByteArray(12)
+        val innerLength = 8 + pixels.size
         header[0] = 0x00.toByte()
-        header[1] = 0x00.toByte()
-        header[2] = 0x00.toByte()       // Padding
-        header[3] = WIDTH.toByte()      // Width LSB
-        header[4] = 0x00.toByte()       // Width MSB
-        header[5] = HEIGHT.toByte()     // Height LSB
-        header[6] = 0x00.toByte()       // Height MSB
-        // Padding because most commands don't work without it
+        header[1] = 0x0A.toByte()
+        header[2] = 0x0A.toByte()
+        header[3] = 0x04.toByte()
+        header[4] = 0xAA.toByte()
+        header[5] = (innerLength and 0xFF).toByte()      // Length LSB
+        header[6] = (innerLength shr 8 and 0xFF).toByte() // Length MSB
         header[7] = 0x00.toByte()
         header[8] = 0x00.toByte()
-        header[9] = 0x00.toByte()
-        header[10] = 0x00.toByte()
+        header[9] = 0x03.toByte() // Palette mode flag (?)
+        header[10] = (colorCount and 0xFF).toByte()       // Color Count LSB
+        header[11] = (colorCount shr 8 and 0xFF).toByte()  // Color Count MSB
 
         val fullPayload = ByteArray(header.size + pixels.size)
         System.arraycopy(header, 0, fullPayload, 0, header.size)
@@ -101,24 +109,91 @@ class PixooManager {
         sendPacket(0x44.toByte(), fullPayload)
     }
 
-    private fun getPixelsFromBitmap(
-        width: Int,
-        height: Int,
+    fun quantizeBitmap(bitmap: Bitmap): Bitmap {
+        val width = bitmap.width
+        val height = bitmap.height
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        val quantizedImage = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+        for (i in pixels.indices) {
+            val color = pixels[i]
+            // Masking the lower 5 bits of R, G, and B to reduce precision
+            // This effectively limits the possible color combinations
+            val r = (color shr 16 and 0xFF) and 0xE0 // Keep top 3 bits
+            val g = (color shr 8 and 0xFF) and 0xE0  // Keep top 3 bits
+            val b = (color and 0xFF) and 0xC0         // Keep top 2 bits
+
+            quantizedImage.setPixel(i % width, i / width, Color.rgb(r, g, b))
+        }
+
+        return quantizedImage
+    }
+
+    private fun getColorPaletteAndColorReferencedImage(
+        palette: MutableList<Int>,
         bitmap: Bitmap
     ): ByteArray {
-        val pixels = ByteArray(width*height*3)
-        var index = 0
+        val width = bitmap.width
+        val height = bitmap.height
+
+        val paletteIndexMap = mutableMapOf<Int, Int>()
+        val screen = IntArray(width * height)
+
+        // Build Palette and Screen Index Map
+        var screenIdx = 0
         for (y in 0 until height) {
             for (x in 0 until width) {
-                val pixel = bitmap.get(x, y)
-                // Conversion from ARGB888 to RGB888
-                pixels[index++] = pixel.red.toByte()   // R
-                pixels[index++] = pixel.green.toByte() // G
-                pixels[index++] = pixel.blue.toByte()  // B
+                val rgb = bitmap.getPixel(x, y) and 0x00FFFFFF
+                val index = paletteIndexMap.getOrPut(rgb) {
+                    palette.add(rgb)
+                    palette.size - 1
+                }
+                screen[screenIdx++] = index
             }
         }
-        return pixels
+
+        val bitLength = max(1, ceil(log2(palette.size.toDouble())).toInt())
+
+        // Encode Image
+        val screenBufferSize = ceil((bitLength * screen.size).toDouble() / 8.0).toInt()
+        val screenBuffer = ByteArray(screenBufferSize)
+        var bufferIndex = 0
+        var current = 0
+        var currentIndex = 0
+
+        for (paletteIndex in screen) {
+            val reference = paletteIndex and ((1 shl bitLength) - 1)
+            current = current or (reference shl currentIndex)
+            currentIndex += bitLength
+
+            while (currentIndex >= 8) {
+                screenBuffer[bufferIndex++] = (current and 0xFF).toByte()
+                current = current ushr 8
+                currentIndex -= 8
+            }
+        }
+        if (currentIndex != 0) screenBuffer[bufferIndex] = (current and 0xFF).toByte()
+
+        val colorCount = palette.size
+        val paletteBytes = colorCount * 3
+        val totalSize = paletteBytes + screenBuffer.size
+        val result = ByteArray(totalSize)
+
+        // Write Color Palette
+        for (i in palette.indices) {
+            val rgb = palette[i]
+            result[i * 3 + 0] = (rgb shr 16 and 0xFF).toByte() // Red
+            result[i * 3 + 1] = (rgb shr 8 and 0xFF).toByte()  // Green
+            result[i * 3 + 2] = (rgb and 0xFF).toByte()        // Blue
+        }
+
+        // Combine into a single ByteArray
+        // Structure: [Palette Bytes] + [Screen Bytes]
+        System.arraycopy(screenBuffer, 0, result, paletteBytes, screenBuffer.size)
+        return result
     }
+
 
     fun printByteArrayHex(bytes: ByteArray, endAfterbytes: Int = 0, bytesPerLine: Int = 32) {
         val sb = StringBuilder()
@@ -203,15 +278,9 @@ class PixooManager {
         // Signal start of package
         outStream.write(0x01)
 
-        // Escaping
         for (b in innerBuffer) {
             val byteVal = b.toInt() and 0xFF
-            when (byteVal) {
-                0x01 -> { outStream.write(0x03); outStream.write(0x04) }
-                0x02 -> { outStream.write(0x03); outStream.write(0x05) }
-                0x03 -> { outStream.write(0x03); outStream.write(0x06) }
-                else -> { outStream.write(byteVal) }
-            }
+            outStream.write(byteVal)
         }
 
         // Signal end of package
@@ -225,9 +294,9 @@ class PixooManager {
         return bytes
     }
 
-    // -------------------------------------------
-    // Helper functions to create test patterns
-    // -------------------------------------------
+// -------------------------------------------
+// Helper functions to create test patterns
+// -------------------------------------------
 
     suspend fun drawGradient(): Bitmap = withContext(Dispatchers.IO) {
         Log.d(TAG, "Filling Screen with red-green Gradient (Corrected Palette Mode)...")
@@ -243,7 +312,7 @@ class PixooManager {
         return@withContext bitmap
     }
 
-    suspend fun fillRed() : Bitmap = withContext(Dispatchers.IO) {
+    suspend fun fillRed(): Bitmap = withContext(Dispatchers.IO) {
         Log.d(TAG, "Filling Screen RED")
         val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
         for (y in 0 until WIDTH) {
@@ -255,7 +324,7 @@ class PixooManager {
         return@withContext bitmap
     }
 
-    suspend fun fillBlue() : Bitmap = withContext(Dispatchers.IO) {
+    suspend fun fillBlue(): Bitmap = withContext(Dispatchers.IO) {
         Log.d(TAG, "Filling Screen BLUE")
         val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
         for (y in 0 until WIDTH) {
@@ -275,7 +344,7 @@ class PixooManager {
                 bitmap.setPixel(x, y, Color.RED)
             }
         }
-        bitmap.setPixel(0,0, Color.GREEN)
+        bitmap.setPixel(0, 0, Color.GREEN)
         sendImage(bitmap)
         return@withContext bitmap
     }
@@ -288,7 +357,7 @@ class PixooManager {
                 bitmap.setPixel(x, y, Color.RED)
             }
         }
-        bitmap.setPixel(1,0, Color.GREEN)
+        bitmap.setPixel(1, 0, Color.GREEN)
         sendImage(bitmap)
         return@withContext bitmap
     }
