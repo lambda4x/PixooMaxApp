@@ -132,10 +132,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PixooApp(pixooManager: PixooManager) {
     var currentMode by remember { mutableStateOf("Connection") }
-    var selectedImages by remember { mutableStateOf(listOf<Uri>()) }
+    var selectedImages by remember { mutableStateOf(listOf<PixooItem>()) }
     var currentIndex by remember { mutableIntStateOf(0) }
     var fightRound by remember { mutableIntStateOf(1) }
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var currentDescription by remember { mutableStateOf("") }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -147,7 +148,7 @@ fun PixooApp(pixooManager: PixooManager) {
             "ImageSettings" -> ImageSettingsScreen(
                 imageList = selectedImages,
                 onAdd = { uri ->
-                    selectedImages = selectedImages + uri
+                    selectedImages = selectedImages + PixooItem(uri, "")
                 },
                 onRemove = { index ->
                     val mutableList = selectedImages.toMutableList()
@@ -155,22 +156,24 @@ fun PixooApp(pixooManager: PixooManager) {
                     selectedImages = mutableList
                 },
                 onReorder = { selectedImages = it },
+                onDescriptionChange = { index, newText ->
+                    val mutableList = selectedImages.toMutableList()
+                    mutableList[index] = mutableList[index].copy(description = newText)
+                    selectedImages = mutableList
+                },
                 onPlay = {
                     currentMode = "PlayMode"
                     fightRound = 1
                     currentIndex = 0
                     scope.launch(Dispatchers.IO) {
-                        val loadedBitmap = if (selectedImages.isNotEmpty()) {
-                            loadBitmapFromUri(
-                                context,
-                                selectedImages[currentIndex % selectedImages.size]
-                            )
-                        } else null
-                        currentBitmap = loadedBitmap
-
-                        if (loadedBitmap != null) {
-                            Log.d("PixooApp", "Sending loaded bitmap to device")
-                            pixooManager.sendImage(loadedBitmap, 1)
+                        if (selectedImages.isNotEmpty()) {
+                            val item = selectedImages[currentIndex % selectedImages.size]
+                            val loadedBitmap = loadBitmapFromUri(context, item.uri)
+                            currentBitmap = loadedBitmap
+                            currentDescription = item.description
+                            if (loadedBitmap != null) {
+                                pixooManager.sendImage(loadedBitmap, 1)
+                            }
                         }
                     }
                 },
@@ -179,6 +182,7 @@ fun PixooApp(pixooManager: PixooManager) {
 
             "PlayMode" -> PlayModeScreen(
                 bitmap = currentBitmap,
+                description = currentDescription,
                 currentRound = fightRound,
                 onRoundChange = { newRound ->
                     fightRound = newRound
@@ -191,14 +195,11 @@ fun PixooApp(pixooManager: PixooManager) {
                             fightRound++
                         }
                         scope.launch(Dispatchers.IO) {
-                            val nextBitmap =
-                                loadBitmapFromUri(
-                                    context,
-                                    selectedImages[currentIndex % selectedImages.size]
-                                )
+                            val item = selectedImages[currentIndex % selectedImages.size]
+                            val nextBitmap = loadBitmapFromUri(context, item.uri)
                             currentBitmap = nextBitmap
+                            currentDescription = item.description
                             if (nextBitmap != null) {
-                                Log.d("PixooApp", "Sending loaded bitmap to device")
                                 pixooManager.sendImage(nextBitmap, fightRound)
                             }
                         }
@@ -246,10 +247,11 @@ fun ConnectionScreen(pixooManager: PixooManager, onConnected: () -> Unit) {
 
 @Composable
 fun ImageSettingsScreen(
-    imageList: List<Uri>,
+    imageList: List<PixooItem>,
     onAdd: (Uri) -> Unit,
     onRemove: (Int) -> Unit,
-    onReorder: (List<Uri>) -> Unit,
+    onReorder: (List<PixooItem>) -> Unit,
+    onDescriptionChange: (Int, String) -> Unit,
     onPlay: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -274,7 +276,7 @@ fun ImageSettingsScreen(
         }
 
         LazyColumn {
-            itemsIndexed(imageList) { index, uri ->
+            itemsIndexed(imageList) { index, item ->
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -282,13 +284,21 @@ fun ImageSettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(
-                        model = uri,
+                        model = item.uri,
                         contentDescription = "Image $index",
                         modifier = Modifier
                             .size(64.dp)
                             .padding(end = 8.dp)
                             .weight(1f, fill = false),
                         contentScale = ContentScale.Crop
+                    )
+                    androidx.compose.material3.TextField(
+                        value = item.description,
+                        onValueChange = { newText -> onDescriptionChange(index, newText) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp),
+                        placeholder = { Text("Label") }
                     )
                     IconButton(onClick = { onReorder(swap(imageList, index, index - 1)) }) {
                         Icon(Icons.Filled.ArrowUpward, "Move Up")
@@ -312,6 +322,7 @@ fun ImageSettingsScreen(
 @Composable
 fun PlayModeScreen(
     bitmap: Bitmap?,
+    description: String,
     currentRound: Int,
     onRoundChange: (Int) -> Unit,
     onNext: () -> Unit,
@@ -358,6 +369,11 @@ fun PlayModeScreen(
         } else {
             Text("No image loaded yet.")
         }
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = description,
+            style = MaterialTheme.typography.headlineMedium
+        )
 
         Spacer(Modifier.height(24.dp))
         Button(
@@ -376,7 +392,7 @@ fun PlayModeScreen(
     }
 }
 
-fun swap(list: List<Uri>, from: Int, to: Int): List<Uri> {
+fun swap(list: List<PixooItem>, from: Int, to: Int): List<PixooItem> {
     if (to !in list.indices) return list
     val mutable = list.toMutableList()
     Collections.swap(mutable, from, to)
@@ -400,3 +416,8 @@ suspend fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
     }
     return null
 }
+
+data class PixooItem(
+    val uri: Uri,
+    val description: String = ""
+)

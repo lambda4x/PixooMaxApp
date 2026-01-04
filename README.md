@@ -14,10 +14,16 @@ Functions:
 - Select and order images from the phone
     - Each image presents a hero or an enemy
     - The order should reflect their order in a fight round (e.g. based on their initiative)
+    - A label can be added to the image (not visible on Pixoo Max)
 - In "Play" mode
-    - A single image is shown on the Pixoo Max display (hero or enemy)
-    - The user can click the "Next" button on the app to show the next image in the chosen order
-    - The "fight round" is shown in the top left corner on the Pixoo Max display
+    - Pixoo Max
+        - The "fight round" is shown in the top left corner on the Pixoo Max display
+        - A single image is shown on the display (hero or enemy)
+    - App
+        - The user can click the "Next" button on to show the next image in the chosen order
+        - The selected image is shown in the app
+        - If given, the label is shown under the image
+        - The fight round can be overridden manually
 
 ## Prerequisites
 
