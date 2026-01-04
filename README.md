@@ -1,25 +1,23 @@
-# Pixoo Max App
+# Pixoo Max DnD Fight App
 
-## Aim
+## App
 
 This repository contains the code to run an Android 13 app on a mobile phone
 and connect it to a Divoom Pixoo Max display via Bluetooth. It is written
 in Kotlin.
 
-The app lets a user select several images from their phone, order them,
-and send them to the Pixoo Max display. The next image in the sequence is only
-shown when a "Next" button is clicked on the app. Additionally, the number of times
-the images have started from the beginning is shown in the top left corner, starting with 1.
+The app is designed to aid the user in a Dnd style round-based fight.
 
-I developed this specifically to show whose turn it is in a fight in a pen and paper
-role playing game, e.g. DnD. The number in the top left corner then denotes the
-fighting round.
+Functions:
 
-## Why another Pixoo Max repository
-
-While there are already several repositories with code to connect to a Pixoo Max,
-I was unable to find one that I could integrate into an Android app.
-Therefore, I had to write my own.
+- Connect to a Pixoo Max display via Bluetooth
+- Select and order images from the phone
+    - Each image presents a hero or an enemy
+    - The order should reflect their order in a fight round (e.g. based on their initiative)
+- In "Play" mode
+    - A single image is shown on the Pixoo Max display (hero or enemy)
+    - The user can click the "Next" button on the app to show the next image in the chosen order
+    - The "fight round" is shown in the top left corner on the Pixoo Max display
 
 ## Prerequisites
 
@@ -30,6 +28,39 @@ To use the app, ensure that these prerequisites are met:
 - Mobile phone has bluetooth enabled
 - Pixoo max display and mobile phone are paired via bluetooth
 - When the app starts for the first time, it needs to be given the permission to use bluetooth
+
+## Images
+
+The images will be scaled down to 32x32 pixels. Moreover,
+the number of colors will be reduced to 256 if the image
+uses more colors.
+Since the "fight round" number in the top left corner
+is always drawn in black, an image with a white background is recommended.
+
+## Package structure
+
+To send a single image with the `0x44` command via Bluetooth,
+the packages are constructed as follows:
+
+| Value | Bytes | Description                                                                    `                                                                                                 |
+|-------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x01  | 1     | Package start flag                                                                                                                                                               |
+|       | 2     | Byte length of Command (1) + Payload + the Length itself (2), Little Endian                                                                                                      |
+| 0x44  | 1     | Command to draw a single image                                                                                                                                                   |
+| 0x00  | 1     | Payload (fixed)                                                                                                                                                                  |
+| 0x0A  | 1     | Payload (fixed)                                                                                                                                                                  |
+| 0x0A  | 1     | Payload (fixed)                                                                                                                                                                  |
+| 0x04  | 1     | Payload (fixed)                                                                                                                                                                  |
+| 0xAA  | 1     | Payload (fixed)                                                                                                                                                                  |
+|       | 2     | Payload, 8 + number of bytes to encode color palette and image, Little Endian                                                                                                    |
+| 0x00  | 1     | Payload (fixed)                                                                                                                                                                  |
+| 0x00  | 1     | Payload (fixed)                                                                                                                                                                  |
+| 0x03  | 1     | Payload (fixed)                                                                                                                                                                  |
+|       | 2     | Payload, count of colors in palette, Little Endian                                                                                                                               |
+|       |       | Payload, Color palette as RGB888, i.e. each color is encoded by 3 bytes (RGB)                                                                                                    |
+|       |       | Payload, actual image where each pixel value is encoded as a reference to the color palette; every Pixel is encoded as densely as possible, i.e. a pixel can be less than 1 byte |
+|       | 2     | Checksum as the sum of the Length, Command, and Payload, Little Endian                                                                                                           |
+| 0x02  | 1     | Package end flag                                                                                                                                                                 |
 
 ## References
 

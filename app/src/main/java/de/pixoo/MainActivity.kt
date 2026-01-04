@@ -10,7 +10,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -86,23 +85,19 @@ class MainActivity : ComponentActivity() {
         }
 
     private fun checkAndRequestBluetoothPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val permissions = arrayOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT
-            )
+        val permissions = arrayOf(
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT
+        )
 
-            val missingPermissions = permissions.filter {
-                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-            }
+        val missingPermissions = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
 
-            if (missingPermissions.isNotEmpty()) {
-                requestPermissionLauncher.launch(missingPermissions.toTypedArray())
-            } else {
-                // Permissions already granted
-            }
+        if (missingPermissions.isNotEmpty()) {
+            requestPermissionLauncher.launch(missingPermissions.toTypedArray())
         } else {
-            // Logic for Android 11 and below; ignore
+            // Permissions already granted
         }
     }
 
@@ -111,8 +106,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val myColors = lightColorScheme(
-            primary = Color.LightGray,
-            onPrimary = Color.White,
+            primary = Color.LightGray, // Button color and Android status bar color
+            onPrimary = Color.Black,   // Text color
             secondary = Color.DarkGray
         )
 
@@ -234,7 +229,10 @@ fun ConnectionScreen(pixooManager: PixooManager, onConnected: () -> Unit) {
             items(devices) { device: BluetoothDevice ->
                 Button(
                     onClick = {
-                        Thread { if (pixooManager.connect(device)) onConnected() }.start()
+                        Thread {
+                            pixooManager.connect(device)
+                            onConnected()
+                        }.start()
                     }, Modifier
                         .fillMaxWidth()
                         .padding(4.dp)

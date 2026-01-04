@@ -1,11 +1,13 @@
 package de.pixoo
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
+import androidx.annotation.RequiresPermission
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -24,49 +26,66 @@ class PixooManager {
     private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
     @SuppressLint("MissingPermission")
-    fun connect(device: BluetoothDevice): Boolean {
+    fun connect(device: BluetoothDevice) {
         Log.d(TAG, "Connecting to ${device.name} (${device.address})...")
         close()
 
         var success = false
-
-        // 1. Bonded -> Secure
-        try {
-            if (device.bondState == BluetoothDevice.BOND_BONDED) {
-                Log.d(TAG, "Attempt 1: Secure Socket (Bonded)")
-                socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-                socket?.connect()
-                success = true
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Secure connect failed: ${e.message}")
-        }
-
-        // 2. Fallback -> Insecure
+        success = connectSecure(device, success)
         if (!success) {
-            try {
-                Log.d(TAG, "Attempt 2: Insecure Socket")
-                socket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
-                socket?.connect()
-                success = true
-            } catch (e: Exception) {
-                Log.w(TAG, "Insecure connect failed: ${e.message}")
-            }
+            success = connectInsecure(device, success)
         }
 
         if (success) {
             outputStream = socket?.outputStream
             inputStream = socket?.inputStream
             Log.d(TAG, "Connected successfully")
-            return true
+            return
         }
-        return false
+        throw Exception("Bluetooth connection failed")
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun connectInsecure(
+        device: BluetoothDevice,
+        success: Boolean
+    ): Boolean {
+        var success1 = success
+        try {
+            Log.d(TAG, "Attempt 2: Insecure Connection")
+            socket = device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+            socket?.connect()
+            success1 = true
+        } catch (e: Exception) {
+            Log.w(TAG, "Insecure connection failed: ${e.message}")
+        }
+        return success1
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun connectSecure(
+        device: BluetoothDevice,
+        success: Boolean
+    ): Boolean {
+        var success1 = success
+        try {
+            if (device.bondState == BluetoothDevice.BOND_BONDED) {
+                Log.d(TAG, "Attempt 1: Secure Connection (Bonded)")
+                socket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+                socket?.connect()
+                success1 = true
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Secure connection failed: ${e.message}")
+        }
+        return success1
     }
 
     private fun close() {
         try {
             socket?.close()
         } catch (e: Exception) {
+            // ignore
         }
         socket = null
         outputStream = null
@@ -83,27 +102,27 @@ class PixooManager {
         val bitmapWithText = drawNumberOnBitmap(rawBitmap, overlayNumber, Color.BLACK)
 
         var colors = mutableListOf<Int>()
-        val pixels = getColorPaletteAndColorReferencedImage(colors, bitmapWithText)
+        val pixelsAndPalette = getColorPaletteAndColorReferencedImage(colors, bitmapWithText)
         val colorCount = colors.size
 
         val header = ByteArray(12)
-        val innerLength = 8 + pixels.size
+        val innerLength = 8 + pixelsAndPalette.size
         header[0] = 0x00.toByte()
         header[1] = 0x0A.toByte()
         header[2] = 0x0A.toByte()
         header[3] = 0x04.toByte()
         header[4] = 0xAA.toByte()
-        header[5] = (innerLength and 0xFF).toByte()      // Length LSB
+        header[5] = (innerLength and 0xFF).toByte()       // Length LSB
         header[6] = (innerLength shr 8 and 0xFF).toByte() // Length MSB
         header[7] = 0x00.toByte()
         header[8] = 0x00.toByte()
         header[9] = 0x03.toByte() // Palette mode flag (?)
         header[10] = (colorCount and 0xFF).toByte()       // Color Count LSB
-        header[11] = (colorCount shr 8 and 0xFF).toByte()  // Color Count MSB
+        header[11] = (colorCount shr 8 and 0xFF).toByte() // Color Count MSB
 
-        val fullPayload = ByteArray(header.size + pixels.size)
+        val fullPayload = ByteArray(header.size + pixelsAndPalette.size)
         System.arraycopy(header, 0, fullPayload, 0, header.size)
-        System.arraycopy(pixels, 0, fullPayload, header.size, pixels.size)
+        System.arraycopy(pixelsAndPalette, 0, fullPayload, header.size, pixelsAndPalette.size)
 
         sendPacket(0x44.toByte(), fullPayload)
     }
@@ -166,6 +185,7 @@ class PixooManager {
 
         if (palette.size > 256) {
             // Need to quantize colors
+            Log.d(TAG, "Quantizing colors...")
             val quantizedBitamp = quantizeBitmap(bitmap)
             screen = IntArray(width * height)
             paletteIndexMap = mutableMapOf<Int, Int>()
@@ -207,8 +227,8 @@ class PixooManager {
             result[i * 3 + 2] = (rgb and 0xFF).toByte()        // Blue
         }
 
-        // Combine into a single ByteArray
-        // Structure: [Palette Bytes] + [Screen Bytes]
+        // Combine Color Palette and image into a single ByteArray
+        // Color Palette first, then Image data
         System.arraycopy(screenBuffer, 0, result, paletteBytes, screenBuffer.size)
         return result
     }
@@ -252,7 +272,7 @@ class PixooManager {
 
     private fun sendPacket(cmd: Byte, payload: ByteArray?) {
         if (outputStream == null) return
-        val buffer = constructBufferEscaped(cmd, payload)
+        val buffer = constructBuffer(cmd, payload)
         try {
             // Send in chunks to prevent buffer overflow on Pixoo
             val chunkSize = 200
@@ -275,7 +295,7 @@ class PixooManager {
     }
 
 
-    private fun constructBufferEscaped(cmd: Byte, payload: ByteArray?): ByteArray {
+    private fun constructBuffer(cmd: Byte, payload: ByteArray?): ByteArray {
         // documentation:
         // https://docin.divoom-gz.com/web/#/5/289
         // https://docin.divoom-gz.com/web/#/5/146
