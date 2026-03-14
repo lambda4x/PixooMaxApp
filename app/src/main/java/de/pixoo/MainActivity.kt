@@ -3,8 +3,8 @@ package de.pixoo
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -38,10 +38,12 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -66,8 +68,12 @@ import coil.compose.AsyncImage
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Collections
 
 class MainActivity : ComponentActivity() {
@@ -76,11 +82,8 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
             val granted = permissions.entries.all { it.value }
-            if (granted) {
-                // Permissions granted
-            } else {
-                // Permissions denied
-                throw Exception("Permissions not granted")
+            if (!granted) {
+                Log.e("MainActivity", "Permissions not granted")
             }
         }
 
@@ -96,8 +99,6 @@ class MainActivity : ComponentActivity() {
 
         if (missingPermissions.isNotEmpty()) {
             requestPermissionLauncher.launch(missingPermissions.toTypedArray())
-        } else {
-            // Permissions already granted
         }
     }
 
@@ -106,8 +107,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val myColors = lightColorScheme(
-            primary = Color.LightGray, // Button color and Android status bar color
-            onPrimary = Color.Black,   // Text color
+            primary = Color.LightGray,
+            onPrimary = Color.Black,
             secondary = Color.DarkGray
         )
 
@@ -141,14 +142,45 @@ fun PixooApp(pixooManager: PixooManager) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val sharedPrefs = remember { context.getSharedPreferences("PixooPrefs", Context.MODE_PRIVATE) }
+    val gson = remember { Gson() }
+
+    val saveSetToInternal = {
+        scope.launch(Dispatchers.IO) {
+            val internalList = selectedImages.map { item ->
+                if (item.isInternal) item
+                else {
+                    val internalPath = saveImageToInternal(context, Uri.parse(item.uriString))
+                    PixooItem(internalPath, item.description, true)
+                }
+            }
+            val json = gson.toJson(internalList)
+            sharedPrefs.edit().putString("saved_set", json).apply()
+            withContext(Dispatchers.Main) {
+                selectedImages = internalList
+            }
+        }
+    }
+
+    val loadSavedSet = {
+        val json = sharedPrefs.getString("saved_set", null)
+        if (json != null) {
+            val type = object : TypeToken<List<PixooItem>>() {}.type
+            selectedImages = gson.fromJson(json, type)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentMode) {
-            "Connection" -> ConnectionScreen(pixooManager) { currentMode = "ImageSettings" }
+            "Connection" -> ConnectionScreen(pixooManager) {
+                loadSavedSet()
+                currentMode = "ImageSettings"
+            }
 
             "ImageSettings" -> ImageSettingsScreen(
                 imageList = selectedImages,
                 onAdd = { uri ->
-                    selectedImages = selectedImages + PixooItem(uri, "")
+                    selectedImages = selectedImages + PixooItem(uri.toString(), "")
                 },
                 onRemove = { index ->
                     val mutableList = selectedImages.toMutableList()
@@ -168,9 +200,11 @@ fun PixooApp(pixooManager: PixooManager) {
                     scope.launch(Dispatchers.IO) {
                         if (selectedImages.isNotEmpty()) {
                             val item = selectedImages[currentIndex % selectedImages.size]
-                            val loadedBitmap = loadBitmapFromUri(context, item.uri)
-                            currentBitmap = loadedBitmap
-                            currentDescription = item.description
+                            val loadedBitmap = loadBitmapFromUri(context, Uri.parse(item.uriString))
+                            withContext(Dispatchers.Main) {
+                                currentBitmap = loadedBitmap
+                                currentDescription = item.description
+                            }
                             if (loadedBitmap != null) {
                                 pixooManager.sendImage(loadedBitmap, 1)
                             }
@@ -178,6 +212,16 @@ fun PixooApp(pixooManager: PixooManager) {
                     }
                 },
                 onOpenSettings = { currentMode = "Connection" },
+                onSaveSet = { saveSetToInternal() },
+                onClearSet = {
+                    scope.launch(Dispatchers.IO) {
+                        selectedImages.forEach { if (it.isInternal) File(it.uriString).delete() }
+                        withContext(Dispatchers.Main) {
+                            selectedImages = emptyList()
+                            sharedPrefs.edit().remove("saved_set").apply()
+                        }
+                    }
+                }
             )
 
             "PlayMode" -> PlayModeScreen(
@@ -186,19 +230,23 @@ fun PixooApp(pixooManager: PixooManager) {
                 currentRound = fightRound,
                 onRoundChange = { newRound ->
                     fightRound = newRound
-                    pixooManager.sendImage(currentBitmap, fightRound)
+                    scope.launch(Dispatchers.IO) {
+                        pixooManager.sendImage(currentBitmap, fightRound)
+                    }
                 },
                 onNext = {
                     if (selectedImages.isNotEmpty()) {
-                        currentIndex = currentIndex + 1
+                        currentIndex++
                         if (currentIndex % selectedImages.size == 0) {
                             fightRound++
                         }
                         scope.launch(Dispatchers.IO) {
                             val item = selectedImages[currentIndex % selectedImages.size]
-                            val nextBitmap = loadBitmapFromUri(context, item.uri)
-                            currentBitmap = nextBitmap
-                            currentDescription = item.description
+                            val nextBitmap = loadBitmapFromUri(context, Uri.parse(item.uriString))
+                            withContext(Dispatchers.Main) {
+                                currentBitmap = nextBitmap
+                                currentDescription = item.description
+                            }
                             if (nextBitmap != null) {
                                 pixooManager.sendImage(nextBitmap, fightRound)
                             }
@@ -217,8 +265,11 @@ fun PixooApp(pixooManager: PixooManager) {
 @SuppressLint("MissingPermission")
 @Composable
 fun ConnectionScreen(pixooManager: PixooManager, onConnected: () -> Unit) {
-    val adapter = BluetoothAdapter.getDefaultAdapter()
+    val context = LocalContext.current
+    val bluetoothManager = remember { context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager }
+    val adapter = bluetoothManager.adapter
     val devices = adapter?.bondedDevices?.toList() ?: emptyList()
+    val scope = rememberCoroutineScope()
 
     Column(
         Modifier
@@ -227,13 +278,19 @@ fun ConnectionScreen(pixooManager: PixooManager, onConnected: () -> Unit) {
     ) {
         Text("1. Connection Settings", style = MaterialTheme.typography.headlineSmall)
         LazyColumn {
-            items(devices) { device: BluetoothDevice ->
+            items(devices) { device ->
                 Button(
                     onClick = {
-                        Thread {
-                            pixooManager.connect(device)
-                            onConnected()
-                        }.start()
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                pixooManager.connect(device)
+                                withContext(Dispatchers.Main) {
+                                    onConnected()
+                                }
+                            } catch (e: Exception) {
+                                Log.e("ConnectionScreen", "Connection failed: ${e.message}")
+                            }
+                        }
                     }, Modifier
                         .fillMaxWidth()
                         .padding(4.dp)
@@ -253,7 +310,9 @@ fun ImageSettingsScreen(
     onReorder: (List<PixooItem>) -> Unit,
     onDescriptionChange: (Int, String) -> Unit,
     onPlay: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onSaveSet: () -> Unit,
+    onClearSet: () -> Unit
 ) {
     val launcher =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -269,10 +328,31 @@ fun ImageSettingsScreen(
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings") }
-            Button(onClick = onPlay) { Text("Play Mode") }
+            Row {
+                Button(onClick = onSaveSet, modifier = Modifier.padding(end = 4.dp)) {
+                    Text("Save Set")
+                }
+                Button(onClick = onPlay) { Text("Play") }
+            }
         }
-        Button(onClick = { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-            Text("Add Image")
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Button(
+                onClick = { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                modifier = Modifier.weight(1f)
+            ) { Text("Add Image") }
+
+            Spacer(Modifier.width(8.dp))
+
+            Button(
+                onClick = onClearSet,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                modifier = Modifier.weight(1f)
+            ) { Text("Delete Set") }
         }
 
         LazyColumn {
@@ -284,7 +364,7 @@ fun ImageSettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     AsyncImage(
-                        model = item.uri,
+                        model = item.uriString,
                         contentDescription = "Image $index",
                         modifier = Modifier
                             .size(64.dp)
@@ -292,7 +372,7 @@ fun ImageSettingsScreen(
                             .weight(1f, fill = false),
                         contentScale = ContentScale.Crop
                     )
-                    androidx.compose.material3.TextField(
+                    TextField(
                         value = item.description,
                         onValueChange = { newText -> onDescriptionChange(index, newText) },
                         modifier = Modifier
@@ -362,7 +442,6 @@ fun PlayModeScreen(
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = "Scaled Image",
-                // Show it bigger than 32x32 for visibility
                 modifier = Modifier.size(128.dp),
                 contentScale = ContentScale.Fit
             )
@@ -400,24 +479,23 @@ fun swap(list: List<PixooItem>, from: Int, to: Int): List<PixooItem> {
 }
 
 suspend fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
-    try {
-        val request = ImageRequest.Builder(context)
-            .data(uri)
-            .size(32, 32)
-            .allowHardware(false)
-            .bitmapConfig(Bitmap.Config.ARGB_8888)
-            .build()
-        val result = context.imageLoader.execute(request)
-        if (result is SuccessResult) {
-            return (result.drawable as? BitmapDrawable)?.bitmap
+    return withContext(Dispatchers.IO) {
+        try {
+            val request = ImageRequest.Builder(context)
+                .data(uri)
+                .size(32, 32)
+                .allowHardware(false)
+                .bitmapConfig(Bitmap.Config.ARGB_8888)
+                .build()
+            val result = context.imageLoader.execute(request)
+            if (result is SuccessResult) {
+                (result.drawable as? BitmapDrawable)?.bitmap
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e("PixooSender", "Load failed: ${e.message}")
+            null
         }
-    } catch (e: Exception) {
-        Log.e("PixooSender", "Load failed: ${e.message}")
     }
-    return null
 }
-
-data class PixooItem(
-    val uri: Uri,
-    val description: String = ""
-)
